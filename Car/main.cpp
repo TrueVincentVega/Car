@@ -100,10 +100,18 @@ class Car
 	Tank tank;*/
 	struct Control
 	{
-		std::thread panel_thread;
-		std::thread engine_idle_thread;
+		std::thread panel_thread; // поток панели управления
+		std::thread engine_idle_thread; // поток работы двигателя
+
+		std::thread main_thread; // поток управления другими потоками
+		std::thread acceleration_thread; // поток движения машины (ускорение)
+		std::thread free_wheeling_thread; // поток движения машины (холостой ход)
 	}control;
 	bool driver_inside;
+	unsigned int speed;
+	unsigned int max_speed;
+	bool gas_pedal;
+	bool brake_pedal;
 public:
 	const Engine& get_engine()const
 	{
@@ -113,14 +121,68 @@ public:
 	{
 		return this->tank;
 	}
-	Car(double engine_consumption, unsigned int tank_volume) :engine(engine_consumption), tank(tank_volume)
+	Car(double engine_consumption, unsigned int tank_volume,unsigned int max_speed=250) :engine(engine_consumption), tank(tank_volume)
 	{
 		driver_inside = false;
+		gas_pedal = false;
+		brake_pedal = false;
+		speed = 0;
+		this->max_speed = max_speed <= 350 ? max_speed : 250;
+
+		control.main_thread = std::thread(&Car::ControlCar, this); // запускаем поток управления машиной
+
 		std::cout << "Your car is ready to go :-)\n";
 	}
 	~Car()
 	{
+		control.main_thread.join(); // принудительно останавливаем поток управления машиной
 		std::cout << "Don't leave me alone.\n";
+	}
+
+	void ControlCar()
+	{
+		using namespace std::literals::chrono_literals;
+		char key;
+		do
+		{
+			key = _getch();
+			switch (key)
+			{
+			case 13:
+				if (driver_inside)this->get_out();
+				else this->get_in();
+				break;
+			case 'i':case 'I': // Ignition - зажигание
+				if (!this->get_engine().Started())this->start();
+				else this->stop();
+				break;
+			case 'f':
+				double amount;
+				std::cout << "How mach?"; std::cin >> amount;
+				this->fill(amount);
+				break;
+			case 27:
+				this->stop();
+				this->get_out();
+				break;
+				//////////////////////// Keys for pedals GAS & BREAK //////////////////
+			case 'w':case 'W':
+				std::this_thread::sleep_for(1s);
+				if (engine.Started())
+				{
+					if (speed < max_speed)speed += 10;
+					else speed = max_speed;
+				}
+				break;
+			case 's':case 'S':
+				if (speed > 20)speed -= 20;
+				else speed = 0;
+				break;
+			}
+			std::this_thread::sleep_for(1s);
+			if (speed > 0 && !control.free_wheeling_thread.joinable())control.free_wheeling_thread = std::thread(&Car::free_weeling, this);
+			else if (speed == 0 && control.free_wheeling_thread.joinable())control.free_wheeling_thread.join();
+		} while (key != 27);
 	}
 
 	void fill(double fuel)
@@ -152,6 +214,7 @@ public:
 			system("CLS");
 			std::cout << "Engine is  " << (engine.Started() ? "started" : "stopped") << ".\n";
 			std::cout << "Fuel level:" << tank.get_fuel() << std::endl;
+			std::cout << "Speed:   " << speed << " km/h" << std::endl;
 			if (tank.get_fuel() < 5)
 			{
 				HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE); // подсветка строки
@@ -196,6 +259,16 @@ public:
 		}
 		engine.stop();
 	}
+
+	void free_weeling()
+	{
+		using namespace std::literals::chrono_literals;
+		while (speed > 0)
+		{
+			speed--;
+			std::this_thread::sleep_for(1s);
+		}
+	}
 };
 
 void main()
@@ -214,24 +287,5 @@ void main()
 	std::cin.get();
 	car.get_in();
 
-	char key;
-	do
-	{
-		key = _getch();
-		switch (key)
-		{
-		case 13:
-			if (!car.get_engine().Started())car.start();
-			else car.stop();
-			break;
-		case 'f':
-			double amount;
-			std::cout << "How mach?"; std::cin >> amount;
-			car.fill(amount);
-			break;
-		case 27:
-			car.stop();
-			car.get_out();
-		}
-	} while (key != 27);
+	
 }
